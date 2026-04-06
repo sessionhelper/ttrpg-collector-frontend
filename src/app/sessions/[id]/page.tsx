@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { Ghost, Flag, Pencil, UserRoundX, Volume2, User, ChevronLeft } from "lucide-react";
 import { useSessionEvents } from "@/hooks/use-session-events";
 import { AppShell } from "@/components/layout/app-shell";
+import Link from "next/link";
 
 interface Segment {
   id: string;
@@ -85,10 +86,10 @@ function initSpeakers(segments: Segment[]) {
   }
 }
 
-function getSpeakerAccent(id: string, dark: boolean): string {
+function getSpeakerAccent(id: string): string {
   const colors = speakerAccentCache[id];
-  if (!colors) return dark ? "#666" : "#999";
-  return dark ? colors.dark : colors.light;
+  if (!colors) return "#999";
+  return colors.light;
 }
 
 function speakerName(id: string): string {
@@ -249,44 +250,12 @@ function buildBlocks(segments: Segment[]): Block[] {
   return blocks;
 }
 
-// Theme
-interface Theme {
-  bg: string;
-  card: string;
-  text: string;
-  textFaint: string;
-  textMuted: string;
-  border: string;
-  activeHighlight: string;
-}
-
-const LIGHT: Theme = {
-  bg: "#f5f0e8",
-  card: "#faf6ef",
-  text: "#2c2416",
-  textFaint: "#b0a48e",
-  textMuted: "#5a4d3a",
-  border: "#d4c9b5",
-  activeHighlight: "rgba(139,69,19,0.07)",
-};
-
-const DARK: Theme = {
-  bg: "#1a1612",
-  card: "#231e18",
-  text: "#ddd5c8",
-  textFaint: "#5a4d3a",
-  textMuted: "#a89880",
-  border: "#342d24",
-  activeHighlight: "rgba(212,168,114,0.08)",
-};
-
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: sessionId } = React.use(params);
   const [data, setData] = useState<PipelineResult | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [selectedScene, setSelectedScene] = useState<number | null>(null);
-  const [dark, setDark] = useState(false);
   const [selection, setSelection] = useState<{ type: "line" | "block" | "scene"; blockIdx: number; segIdx?: number; scene?: number } | null>(null);
   const [flashingBlock, setFlashingBlock] = useState<number | null>(null);
   const [edits, setEdits] = useState<Record<string, SegmentEdits>>({});
@@ -331,8 +300,6 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
       }
     }, []),
   });
-
-  const t = dark ? DARK : LIGHT;
 
   useEffect(() => {
     fetch(`/api/sessions/${sessionId}/segments`)
@@ -445,13 +412,18 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
   const blocks = useMemo(() => buildBlocks(filteredSegments), [filteredSegments]);
 
-  if (!data) return <div className="flex items-center justify-center h-screen font-sans" style={{ color: t.textFaint, background: t.bg }}>Loading...</div>;
+  if (!data) return (
+    <AppShell>
+      <div className="flex items-center justify-center h-64 font-sans text-ink-faint">Loading...</div>
+    </AppShell>
+  );
 
   const scenes = [...new Set(data.segments.filter((s) => !s.excluded).map((s) => s.chunk_group ?? 0))].sort((a, b) => a - b);
   const maxTime = Math.max(...data.segments.filter((s) => !s.excluded).map((s) => s.end_time));
+  const speakerCount = Object.keys(speakerNameCache).length;
 
   return (
-    <div className="min-h-screen transition-colors duration-200" style={{ background: t.bg }}>
+    <AppShell>
       <style>{`
         .speaker-glow {
           text-shadow: 0 0 3px rgba(139, 69, 19, 0.52);
@@ -470,55 +442,76 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           transition: text-shadow 0.8s ease-out;
         }
       `}</style>
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b transition-colors duration-200" style={{ background: t.card, borderColor: t.border }}>
-        <div className="max-w-[620px] mx-auto px-5 py-2 flex items-center gap-3">
+
+      {/* Back link */}
+      <Link href="/sessions" className="inline-flex items-center gap-1 font-sans text-sm text-ink-faint hover:text-ink transition-colors mb-4">
+        <ChevronLeft size={14} />
+        Back to sessions
+      </Link>
+
+      {/* Session info header */}
+      <div className="mb-4">
+        <h1 className="font-serif text-xl font-semibold text-ink">
+          Session {sessionId.substring(0, 8)}
+        </h1>
+        <p className="font-sans text-sm text-ink-light mt-0.5">
+          {speakerCount} speaker{speakerCount !== 1 ? "s" : ""}
+          {data.duration_processed > 0 && <> &middot; {formatTime(data.duration_processed)}</>}
+          {data.segments_produced > 0 && <> &middot; {data.segments_produced} segments</>}
+        </p>
+      </div>
+
+      {/* Control strip: playback + scene filter */}
+      <div className="border border-rule rounded bg-card-surface px-4 py-2.5 mb-6">
+        <div className="flex items-center gap-3 flex-wrap">
           <button onClick={() => setPlaying(!playing)}
-            className="px-3 py-1 rounded font-sans text-sm"
-            style={{ background: "var(--primary)", color: "#faf6ef" }}>
+            className="px-3 py-1 rounded font-sans text-sm bg-accent-brown text-card-surface hover:bg-accent-light transition-colors">
             {playing ? "Pause" : "Play"}
           </button>
           <input type="range" min={0} max={maxTime} step={0.1} value={currentTime}
             onChange={(e) => setCurrentTime(parseFloat(e.target.value))}
-            className="flex-1 accent-[#8b4513]" />
-          <span className="font-mono text-xs" style={{ color: t.textFaint }}>{formatTime(currentTime)}</span>
-          <button onClick={() => setDark(!dark)}
-            className="px-2 py-1 rounded font-sans text-xs border transition-colors"
-            style={{ borderColor: t.border, color: t.textMuted }}>
-            {dark ? "Light" : "Dark"}
-          </button>
+            className="flex-1 min-w-[120px] accent-[#8b4513]" />
+          <span className="font-mono text-xs text-ink-faint">{formatTime(currentTime)}</span>
+          {scenes.length > 1 && (
+            <>
+              <div className="w-px h-5 bg-rule mx-1" />
+              <span className="font-sans text-xs text-ink-faint">Scene:</span>
+              <div className="flex gap-1 flex-wrap">
+                <button onClick={() => setSelectedScene(null)}
+                  className={`px-2 py-0.5 rounded font-sans text-xs border transition-colors ${
+                    selectedScene === null
+                      ? "bg-accent-brown text-card-surface border-accent-brown"
+                      : "bg-transparent text-ink-faint border-rule hover:border-ink-faint"
+                  }`}>All</button>
+                {scenes.map((s) => (
+                  <button key={s} onClick={() => setSelectedScene(s)}
+                    className={`px-2 py-0.5 rounded font-sans text-xs border transition-colors ${
+                      selectedScene === s
+                        ? "bg-accent-brown text-card-surface border-accent-brown"
+                        : "bg-transparent text-ink-faint border-rule hover:border-ink-faint"
+                    }`}>
+                    {s + 1}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-        <div className="max-w-[620px] mx-auto px-5 pb-2 flex gap-1 flex-wrap">
-          <button onClick={() => setSelectedScene(null)}
-            className="px-2 py-0.5 rounded font-sans text-xs border"
-            style={{
-              background: selectedScene === null ? "#8b4513" : "transparent",
-              color: selectedScene === null ? "#faf6ef" : t.textFaint,
-              borderColor: selectedScene === null ? "#8b4513" : t.border,
-            }}>All</button>
-          {scenes.map((s) => (
-            <button key={s} onClick={() => setSelectedScene(s)}
-              className="px-2 py-0.5 rounded font-sans text-xs border"
-              style={{
-                background: selectedScene === s ? "#8b4513" : "transparent",
-                color: selectedScene === s ? "#faf6ef" : t.textFaint,
-                borderColor: selectedScene === s ? "#8b4513" : t.border,
-              }}>Scene {s + 1}</button>
-          ))}
-        </div>
-      </header>
+      </div>
 
-      {/* Script body */}
-      <main className="max-w-[620px] mx-auto pl-14 pr-12 py-6">
+      {/* Transcript area */}
+      <div className="max-w-[620px] pl-14 pr-4">
         {/* Speaker legend */}
-        <div className="flex gap-4 mb-6 font-sans text-xs" style={{ color: t.textMuted }}>
+        <div className="flex gap-4 mb-6 font-sans text-xs text-ink-light">
           {Object.entries(speakerNameCache).map(([id, name]) => (
             <div key={id} className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: getSpeakerAccent(id, dark) }} />
-              <span>{name}</span>
+              <User size={12} style={{ color: getSpeakerAccent(id) }} />
+              <span className="font-serif italic">{name}</span>
             </div>
           ))}
         </div>
+
+        <div className="border-t border-rule mb-6" />
 
         {blocks.map((block, bi) => {
           const isActive = block.startTime <= currentTime && block.endTime > currentTime;
@@ -529,8 +522,6 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           const prevScene = prevBlock?.segments[0]?.chunk_group ?? null;
           const sceneBreak = prevBlock !== null && prevScene !== null && thisScene !== prevScene;
 
-          const confs = block.segments.map((s) => s.confidence).filter((c): c is number => c !== null);
-          const avgConf = confs.length > 0 ? confs.reduce((a, b) => a + b, 0) / confs.length : null;
           const isGM = block.type === "single" && block.segments[0]?.speaker_pseudo_id === GM_ID_REF.current;
           const isSelected = selection !== null && selection.blockIdx === bi;
 
@@ -538,8 +529,8 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             <div key={bi} ref={(el) => { blockRefs.current[bi] = el; }}
               style={{
                 // Temporal whitespace: map silence gap to vertical margin.
-                // Same speaker → magnetic, pull tight regardless of gap.
-                // Different speaker → gap reflects the pause duration.
+                // Same speaker -> magnetic, pull tight regardless of gap.
+                // Different speaker -> gap reflects the pause duration.
                 marginTop: (() => {
                   if (!prevBlock || sceneBreak) return 0;
                   const sameSpeaker = prevBlock.type === "single" && block.type === "single" &&
@@ -562,11 +553,11 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                       : { type: "scene", blockIdx: bi, scene: thisScene }
                   )}
                 >
-                  <div className="flex-1 h-px" style={{ background: t.border }} />
-                  <span className="font-sans text-[10px] uppercase tracking-widest group-hover:underline" style={{ color: t.textFaint }}>
+                  <div className="flex-1 h-px bg-rule" />
+                  <span className="font-sans text-[10px] uppercase tracking-widest text-ink-faint group-hover:underline">
                     Scene {thisScene + 1}
                   </span>
-                  <div className="flex-1 h-px" style={{ background: t.border }} />
+                  <div className="flex-1 h-px bg-rule" />
                 </div>
               )}
 
@@ -574,9 +565,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                 className="relative cursor-pointer group"
                 style={{ opacity: playing && isPast && !isActive ? 0.4 : 1, transition: "opacity 150ms" }}
               >
-
-
-                {/* Content — click block-level */}
+                {/* Content -- click block-level */}
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
@@ -597,16 +586,16 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                   }}
                 >
                   {block.type === "overlap" ? (
-                    <OverlapBlock block={block} dark={dark} t={t} playing={playing} currentTime={currentTime} onPlayClip={playClip} />
+                    <OverlapBlock block={block} playing={playing} currentTime={currentTime} onPlayClip={playClip} />
                   ) : block.column ? (
-                    // Columned single block — stays in its lane
+                    // Columned single block -- stays in its lane
                     <div className="grid grid-cols-2 gap-4">
                       {block.column === "left" ? (
                         <>
-                          <SingleBlock block={block} isGM={isGM} dark={dark} t={t}
+                          <SingleBlock block={block} isGM={isGM}
                             onLineClick={undefined}
                             selectedLine={undefined}
-                            theme={t} playing={playing} currentTime={currentTime} onPlayClip={playClip} isSelected={isSelected}
+                            playing={playing} currentTime={currentTime} onPlayClip={playClip} isSelected={isSelected}
                             editingSegId={editingSegId} editText={editText} setEditText={setEditText}
                             startEdit={startEdit} saveEditWithText={saveEditWithText} getDisplayText={getDisplayText}
                             getPreviousText={getPreviousText} hasEdits={hasEdits} revertTo={revertTo} />
@@ -615,10 +604,10 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                       ) : (
                         <>
                           <div />
-                          <SingleBlock block={block} isGM={isGM} dark={dark} t={t}
+                          <SingleBlock block={block} isGM={isGM}
                             onLineClick={undefined}
                             selectedLine={undefined}
-                            theme={t} playing={playing} currentTime={currentTime} onPlayClip={playClip} isSelected={isSelected}
+                            playing={playing} currentTime={currentTime} onPlayClip={playClip} isSelected={isSelected}
                             editingSegId={editingSegId} editText={editText} setEditText={setEditText}
                             startEdit={startEdit} saveEditWithText={saveEditWithText} getDisplayText={getDisplayText}
                             getPreviousText={getPreviousText} hasEdits={hasEdits} revertTo={revertTo} />
@@ -626,32 +615,31 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                       )}
                     </div>
                   ) : (
-                    <SingleBlock block={block} isGM={isGM} dark={dark} t={t}
+                    <SingleBlock block={block} isGM={isGM}
                       onLineClick={(segIdx) => setSelection({ type: "line", blockIdx: bi, segIdx })}
                       selectedLine={selection?.type === "line" && selection.blockIdx === bi ? selection.segIdx : undefined}
-                      theme={t} playing={playing} currentTime={currentTime} onPlayClip={playClip} isSelected={isSelected}
+                      playing={playing} currentTime={currentTime} onPlayClip={playClip} isSelected={isSelected}
                             editingSegId={editingSegId} editText={editText} setEditText={setEditText}
                             startEdit={startEdit} saveEditWithText={saveEditWithText} getDisplayText={getDisplayText}
                             getPreviousText={getPreviousText} hasEdits={hasEdits} revertTo={revertTo} />
                   )}
                 </div>
 
-                {/* Right-edge toolbar — appears on selection */}
+                {/* Right-edge toolbar -- appears on selection */}
               </div>
             </div>
           );
         })}
         <div className="h-[50vh]" />
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
-function SingleBlock({ block, isGM, dark, t, onLineClick, selectedLine, theme, hideGutter, playing, currentTime, onPlayClip, isSelected, editingSegId, editText, setEditText, startEdit, saveEditWithText, getDisplayText, getPreviousText, hasEdits, revertTo }: {
-  block: Block; isGM: boolean; dark: boolean; t: Theme;
+function SingleBlock({ block, isGM, onLineClick, selectedLine, hideGutter, playing, currentTime, onPlayClip, isSelected, editingSegId, editText, setEditText, startEdit, saveEditWithText, getDisplayText, getPreviousText, hasEdits, revertTo }: {
+  block: Block; isGM: boolean;
   onLineClick?: (segIdx: number) => void;
   selectedLine?: number;
-  theme: Theme;
   hideGutter?: boolean;
   playing?: boolean;
   currentTime?: number;
@@ -667,17 +655,17 @@ function SingleBlock({ block, isGM, dark, t, onLineClick, selectedLine, theme, h
   hasEdits?: (id: string) => boolean;
   revertTo?: (id: string, layer: number) => void;
 }) {
-  const accent = getSpeakerAccent(block.segments[0].speaker_pseudo_id, dark);
+  const accent = getSpeakerAccent(block.segments[0].speaker_pseudo_id);
   const confs = block.segments.map((s) => s.confidence).filter((c): c is number => c !== null);
   const avgConf = confs.length > 0 ? confs.reduce((a, b) => a + b, 0) / confs.length : null;
   const isEditing = editingSegId === block.segments[0].id;
 
   return (
     <div className="relative flex gap-0" style={{ paddingTop: block.showName ? 6 : 0, marginBottom: block.showName ? 1 : 0 }}>
-      {/* Per-bar gutter — hidden during edit to avoid clipping */}
+      {/* Per-bar gutter -- hidden during edit to avoid clipping */}
       {!hideGutter && !isEditing && (
         <div className="absolute flex items-center gap-0.5" style={{ right: "calc(100% + 2px)", top: block.showName ? 7 : 1, whiteSpace: "nowrap" }}>
-          <span className="font-mono text-[8px]" style={{ color: t.textFaint }}>{formatTime(block.startTime)}</span>
+          <span className="font-mono text-[8px] text-ink-faint">{formatTime(block.startTime)}</span>
           <div className="w-1.5 flex items-center justify-center shrink-0">
             {avgConf !== null && avgConf < -0.5 && (
               <div className="w-1 h-1 rounded-full" style={{ background: confidenceDot(avgConf) }} />
@@ -694,13 +682,14 @@ function SingleBlock({ block, isGM, dark, t, onLineClick, selectedLine, theme, h
             <div className="flex items-center gap-1.5 -mb-0.5">
               <button
                 className={`transition-all duration-300 cursor-pointer hover:opacity-80 ${isBlockPlaying ? "speaker-glow" : ""}`}
-                style={{ color: isBlockPlaying ? accent : t.textFaint }}
+                style={{ color: isBlockPlaying ? accent : undefined }}
                 onClick={(e) => { e.stopPropagation(); onPlayClip?.(block.startTime); }}
                 title="Play clip"
               >
-                <Volume2 size={11} />
+                <Volume2 size={11} className={isBlockPlaying ? "" : "text-ink-faint"} />
               </button>
-              <div className={`font-sans text-[11px] font-semibold uppercase tracking-[0.08em] ${isBlockPlaying ? "speaker-glow" : "speaker-dim"}`} style={{ color: accent }}>
+              <User size={12} style={{ color: accent }} />
+              <div className={`font-serif text-[12px] italic ${isBlockPlaying ? "speaker-glow" : "speaker-dim"}`} style={{ color: accent }}>
                 {speakerName(block.segments[0].speaker_pseudo_id)}
               </div>
             </div>
@@ -718,7 +707,7 @@ function SingleBlock({ block, isGM, dark, t, onLineClick, selectedLine, theme, h
 
           const contentEditableRef = (el: HTMLDivElement | null) => {
             // Focus the element if not already focused, but don't
-            // move the cursor — preserve the browser's word selection
+            // move the cursor -- preserve the browser's word selection
             // from double-click.
             if (el && isEditing && el !== document.activeElement) {
               el.focus();
@@ -729,12 +718,12 @@ function SingleBlock({ block, isGM, dark, t, onLineClick, selectedLine, theme, h
             <>
               {blockEdited && blockPrevText && !isEditing && (
                 <div>
-                  <span className="line-through font-serif text-[13px]" style={{ color: t.textFaint, textDecorationColor: t.textFaint }}>
+                  <span className="line-through font-serif text-[13px] text-ink-faint">
                     {blockPrevText}
                   </span>
                   {revertTo && (
-                    <button className="ml-1 font-sans text-[10px] hover:opacity-60" style={{ color: t.textFaint }}
-                      onClick={(e) => { e.stopPropagation(); revertTo(blockId, 0); }} title="Revert to original">↩</button>
+                    <button className="ml-1 font-sans text-[10px] text-ink-faint hover:opacity-60"
+                      onClick={(e) => { e.stopPropagation(); revertTo(blockId, 0); }} title="Revert to original">&#8617;</button>
                   )}
                 </div>
               )}
@@ -742,11 +731,9 @@ function SingleBlock({ block, isGM, dark, t, onLineClick, selectedLine, theme, h
                 ref={isEditing ? contentEditableRef : undefined}
                 contentEditable={isEditing}
                 suppressContentEditableWarning
-                className={`${isGM ? "italic " : ""}font-serif text-[15px] ${isBlockActive ? "text-glow" : "text-dim"} ${isEditing ? "outline-none border-b" : ""}`}
+                className={`${isGM ? "italic " : ""}font-serif text-[15px] text-ink ${isBlockActive ? "text-glow" : "text-dim"} ${isEditing ? "outline-none border-b border-rule" : ""}`}
                 style={{
-                  color: t.text,
                   lineHeight: "1.35",
-                  borderColor: isEditing ? t.border : "transparent",
                 }}
                 onBlur={(e) => {
                   if (isEditing && saveEditWithText) {
@@ -770,10 +757,10 @@ function SingleBlock({ block, isGM, dark, t, onLineClick, selectedLine, theme, h
               }
               {isSelected && startEdit && (
                 <span className="inline-flex gap-2 ml-2 align-middle" onClick={(e) => e.stopPropagation()}>
-                  <button title="Flag hallucination" className="hover:opacity-60 transition-opacity" style={{ color: t.textFaint }}><Ghost size={11} /></button>
-                  <button title="Flag misattribution" className="hover:opacity-60 transition-opacity" style={{ color: t.textFaint }}><UserRoundX size={11} /></button>
-                  <button title="Flag private" className="hover:opacity-60 transition-opacity" style={{ color: t.textFaint }}><Flag size={11} /></button>
-                  <button title="Edit" className="hover:opacity-60 transition-opacity" style={{ color: t.textFaint }}
+                  <button title="Flag hallucination" className="text-ink-faint hover:opacity-60 transition-opacity"><Ghost size={11} /></button>
+                  <button title="Flag misattribution" className="text-ink-faint hover:opacity-60 transition-opacity"><UserRoundX size={11} /></button>
+                  <button title="Flag private" className="text-ink-faint hover:opacity-60 transition-opacity"><Flag size={11} /></button>
+                  <button title="Edit" className="text-ink-faint hover:opacity-60 transition-opacity"
                     onClick={() => startEdit(block.segments)}><Pencil size={11} /></button>
                 </span>
               )}
@@ -786,7 +773,7 @@ function SingleBlock({ block, isGM, dark, t, onLineClick, selectedLine, theme, h
   );
 }
 
-function OverlapBlock({ block, dark, t, playing, currentTime, onPlayClip }: { block: Block; dark: boolean; t: Theme; playing?: boolean; currentTime?: number; onPlayClip?: (time: number) => void }) {
+function OverlapBlock({ block, playing, currentTime, onPlayClip }: { block: Block; playing?: boolean; currentTime?: number; onPlayClip?: (time: number) => void }) {
   const bySpeaker: Record<string, Segment[]> = {};
   for (const seg of block.segments) {
     if (!bySpeaker[seg.speaker_pseudo_id]) {
@@ -808,13 +795,13 @@ function OverlapBlock({ block, dark, t, playing, currentTime, onPlayClip }: { bl
 
   return (
     <div className="mb-1 pt-2">
-      <div className="font-sans text-[9px] uppercase tracking-widest ml-1 mb-1 mt-3" style={{ color: t.textFaint }}>
+      <div className="font-sans text-[9px] uppercase tracking-widest ml-1 mb-1 mt-3 text-ink-faint">
         (simultaneous)
       </div>
       <div className="grid grid-cols-2 gap-4">
         {order.map((spk) => {
           const segs = bySpeaker[spk];
-          const accent = getSpeakerAccent(spk, dark);
+          const accent = getSpeakerAccent(spk);
           const isGMSpeaker = spk === GM_ID_REF.current;
 
           const confs = segs.map((s) => s.confidence).filter((c): c is number => c !== null);
@@ -822,9 +809,9 @@ function OverlapBlock({ block, dark, t, playing, currentTime, onPlayClip }: { bl
 
           return (
             <div key={spk} className="relative flex gap-0 mb-0.5" style={{ paddingTop: 5 }}>
-              {/* Per-column gutter — tight to bar */}
+              {/* Per-column gutter -- tight to bar */}
               <div className="absolute flex items-center gap-0.5" style={{ right: "calc(100% + 2px)", top: 6, whiteSpace: "nowrap" }}>
-                <span className="font-mono text-[8px]" style={{ color: t.textFaint }}>{formatTime(segs[0].start_time)}</span>
+                <span className="font-mono text-[8px] text-ink-faint">{formatTime(segs[0].start_time)}</span>
                 <div className="w-1.5 flex items-center justify-center shrink-0">
                   {avgConf !== null && avgConf < -0.5 && (
                     <div className="w-1 h-1 rounded-full" style={{ background: confidenceDot(avgConf) }} />
@@ -840,19 +827,20 @@ function OverlapBlock({ block, dark, t, playing, currentTime, onPlayClip }: { bl
                     <div className="flex items-center gap-1.5 -mb-0.5">
                       <button
                         className={`transition-all duration-300 cursor-pointer hover:opacity-80 ${isSpkPlaying ? "speaker-glow" : ""}`}
-                        style={{ color: isSpkPlaying ? accent : t.textFaint }}
+                        style={{ color: isSpkPlaying ? accent : undefined }}
                         onClick={(e) => { e.stopPropagation(); onPlayClip?.(segs[0].start_time); }}
                         title="Play clip"
                       >
-                        <Volume2 size={11} />
+                        <Volume2 size={11} className={isSpkPlaying ? "" : "text-ink-faint"} />
                       </button>
-                      <div className={`font-sans text-[11px] font-semibold uppercase tracking-[0.08em] ${isSpkPlaying ? "speaker-glow" : "speaker-dim"}`} style={{ color: accent }}>
+                      <User size={12} style={{ color: accent }} />
+                      <div className={`font-serif text-[12px] italic ${isSpkPlaying ? "speaker-glow" : "speaker-dim"}`} style={{ color: accent }}>
                         {speakerName(spk)}
                       </div>
                     </div>
                   );
                 })()}
-                <p className={`${isGMSpeaker ? "italic " : ""}font-serif text-[15px]`} style={{ color: t.text, lineHeight: "1.35" }}>
+                <p className={`${isGMSpeaker ? "italic " : ""}font-serif text-[15px] text-ink`} style={{ lineHeight: "1.35" }}>
                   {segs.map((s) => s.text).join(" ")}
                 </p>
               </div>
@@ -864,8 +852,8 @@ function OverlapBlock({ block, dark, t, playing, currentTime, onPlayClip }: { bl
   );
 }
 
-function SpeakerColumn({ speakerId, segments, dark, t }: { speakerId: string; segments: Segment[]; dark: boolean; t: Theme }) {
-  const accent = getSpeakerAccent(speakerId, dark);
+function SpeakerColumn({ speakerId, segments }: { speakerId: string; segments: Segment[] }) {
+  const accent = getSpeakerAccent(speakerId);
   const isGM = speakerId === GM_ID_REF.current;
   const confs = segments.map((s) => s.confidence).filter((c): c is number => c !== null);
   const avgConf = confs.length > 0 ? confs.reduce((a, b) => a + b, 0) / confs.length : null;
@@ -875,12 +863,13 @@ function SpeakerColumn({ speakerId, segments, dark, t }: { speakerId: string; se
       <div className="w-[3px] shrink-0 self-stretch" style={{ background: accent, opacity: 0.7 }} />
       <div className="pl-2 min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="font-sans text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: accent }}>
+          <User size={12} style={{ color: accent }} />
+          <span className="font-serif text-[12px] italic" style={{ color: accent }}>
             {speakerName(speakerId)}
           </span>
           <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: confidenceDot(avgConf) }} />
         </div>
-        <p className={`${isGM ? "italic " : ""}font-serif text-[14px]`} style={{ color: t.text, lineHeight: "1.35" }}>
+        <p className={`${isGM ? "italic " : ""}font-serif text-[14px] text-ink`} style={{ lineHeight: "1.35" }}>
           {segments.map((s) => s.text).join(" ")}
         </p>
       </div>
