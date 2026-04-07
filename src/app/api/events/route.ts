@@ -2,21 +2,57 @@
  * SSE endpoint that bridges data-api WebSocket events to the browser.
  *
  * The browser opens an EventSource to `/api/events?session_id=<uuid>`.
- * This route connects to the data-api WebSocket, subscribes to the
- * requested session's events, and forwards them as SSE messages.
+ * This route connects to the data-api WebSocket (authenticated via the
+ * server-side shared secret), subscribes to the requested session's
+ * events, and forwards them as SSE messages.
  *
  * Using SSE instead of WebSocket for the browser connection because:
  * - SSE works natively with Next.js API routes (no upgrade needed)
  * - The browser only needs one-way streaming (server -> client)
  * - Mutations go through regular REST calls
+ *
+ * Filtered events:
+ * - `chunk_uploaded` is internal-only and NOT forwarded to the browser.
+ * - All other event types (session_status_changed, segment_added,
+ *   segments_batch_added, transcription_progress, beat_detected,
+ *   scene_detected) are forwarded.
  */
 
 import WebSocket from "ws";
 
-const DATA_API_WS_URL =
-  process.env.DATA_API_WS_URL || "ws://localhost:8001/ws";
+const DATA_API_URL = process.env.DATA_API_URL || "http://localhost:8001";
+const SHARED_SECRET = process.env.DATA_API_SHARED_SECRET || "";
+
+/** Events that should NOT be forwarded to the browser. */
+const INTERNAL_ONLY_EVENTS = new Set(["chunk_uploaded"]);
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Authenticate with the data-api and return the WS URL with token.
+ * Uses the same shared-secret auth as `src/lib/data-api.ts`.
+ */
+async function getAuthenticatedWsUrl(): Promise<string> {
+  const res = await fetch(`${DATA_API_URL}/internal/auth`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      shared_secret: SHARED_SECRET,
+      service_name: "ttrpg-collector-frontend",
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Data API auth failed: ${res.status} ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  const token = data.session_token;
+
+  // Convert http(s) base URL to ws(s) for the WebSocket connection
+  const wsBase = DATA_API_URL.replace(/^http/, "ws");
+  return `${wsBase}/ws?token=${encodeURIComponent(token)}`;
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -24,6 +60,18 @@ export async function GET(request: Request) {
 
   if (!sessionId) {
     return new Response("session_id query parameter required", { status: 400 });
+  }
+
+  // Get an authenticated WS URL before setting up the stream
+  let wsUrl: string;
+  try {
+    wsUrl = await getAuthenticatedWsUrl();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "auth failed";
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 502,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const encoder = new TextEncoder();
@@ -44,7 +92,7 @@ export async function GET(request: Request) {
       request.signal.addEventListener("abort", cleanup);
 
       try {
-        ws = new WebSocket(DATA_API_WS_URL);
+        ws = new WebSocket(wsUrl);
       } catch {
         controller.enqueue(
           encoder.encode(
@@ -73,6 +121,9 @@ export async function GET(request: Request) {
         try {
           const event = JSON.parse(data.toString());
           const eventType = event.event || "unknown";
+
+          // Don't forward internal-only events to the browser
+          if (INTERNAL_ONLY_EVENTS.has(eventType)) return;
 
           controller.enqueue(
             encoder.encode(

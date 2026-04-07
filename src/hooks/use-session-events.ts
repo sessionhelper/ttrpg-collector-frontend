@@ -17,6 +17,7 @@ export interface SessionEventCallbacks {
   onSegmentAdded?: (data: { session_id: string; segment: Record<string, unknown> }) => void;
   onSegmentsBatchAdded?: (data: { session_id: string; count: number }) => void;
   onStatusChanged?: (data: { session_id: string; status: string }) => void;
+  /** @deprecated chunk_uploaded is no longer forwarded from the SSE bridge (internal-only event). Callback will never fire. */
   onChunkUploaded?: (data: { session_id: string; pseudo_id: string; seq: number; size: number }) => void;
   onBeatDetected?: (data: { session_id: string; beat: Record<string, unknown> }) => void;
   onSceneDetected?: (data: { session_id: string; scene: Record<string, unknown> }) => void;
