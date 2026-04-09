@@ -1,113 +1,229 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TranscriptSegment } from "@/lib/types";
 
-const BASE = "/api/v1";
+/**
+ * Audio playback hook for the session transcript viewer.
+ *
+ * Fetches the mixed WAV from the BFF audio proxy, creates an
+ * HTMLAudioElement, and exposes play/pause/seek controls. Tracks
+ * currentTime so the transcript can highlight the active segment
+ * and auto-scroll to follow playback.
+ *
+ * The audio source is: GET /api/sessions/{id}/audio
+ * which returns a WAV file mixing all speakers.
+ */
 
 export interface UseAudioPlayback {
-  playingSegId: string | null;
-  sessionPlaying: boolean;
-  playClip: (segment: TranscriptSegment) => void;
-  playSession: (startTime?: number) => void;
-  stopAll: () => void;
+  /** Whether audio is currently playing */
+  playing: boolean;
+  /** Current playback position in seconds */
+  currentTime: number;
+  /** Total duration of the audio in seconds (0 until loaded) */
+  duration: number;
+  /** Whether the audio has been loaded */
+  loaded: boolean;
+  /** Loading state */
+  loading: boolean;
+  /** Error message if audio failed to load */
+  error: string | null;
+  /** Start or resume playback, optionally from a specific time */
+  play: (startTime?: number) => void;
+  /** Pause playback */
+  pause: () => void;
+  /** Toggle play/pause */
+  togglePlay: () => void;
+  /** Seek to a specific time without changing play/pause state */
+  seek: (time: number) => void;
+  /** Stop and reset to beginning */
+  stop: () => void;
 }
 
-export function useAudioPlayback(
-  sessionId: string,
-  segments: TranscriptSegment[]
-): UseAudioPlayback {
-  const [playingSegId, setPlayingSegId] = useState<string | null>(null);
-  const [sessionPlaying, setSessionPlaying] = useState(false);
-  const audioMapRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const sessionAudioRef = useRef<HTMLAudioElement | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+export function useAudioPlayback(sessionId: string): UseAudioPlayback {
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const stopAll = useCallback(() => {
-    audioMapRef.current.forEach((audio) => {
-      audio.pause();
-      audio.currentTime = 0;
-    });
-    if (sessionAudioRef.current) {
-      sessionAudioRef.current.pause();
-      sessionAudioRef.current.currentTime = 0;
-    }
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-    setPlayingSegId(null);
-    setSessionPlaying(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
+
+  // Time-update loop using requestAnimationFrame for smooth tracking
+  const startTimeLoop = useCallback(() => {
+    const tick = () => {
+      if (audioRef.current) {
+        setCurrentTime(audioRef.current.currentTime);
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
   }, []);
 
-  const playClip = useCallback(
-    (segment: TranscriptSegment) => {
-      stopAll();
+  const stopTimeLoop = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
 
-      let audio = audioMapRef.current.get(segment.id);
-      if (!audio) {
-        audio = new Audio(
-          `${BASE}/sessions/${sessionId}/audio/clip?speaker=${encodeURIComponent(segment.speaker_label)}&start=${segment.start_time}&end=${segment.end_time}`
-        );
-        audioMapRef.current.set(segment.id, audio);
+  // Ensure audio element exists and WAV is loaded
+  const ensureAudio = useCallback(async (): Promise<HTMLAudioElement | null> => {
+    if (audioRef.current && loaded) return audioRef.current;
+    if (loading) return null;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/audio`);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Audio fetch failed: ${res.status} ${body}`);
       }
 
-      audio.currentTime = 0;
-      audio.play();
-      setPlayingSegId(segment.id);
+      const blob = await res.blob();
 
-      audio.onended = () => {
-        setPlayingSegId(null);
-      };
-    },
-    [sessionId, stopAll]
-  );
-
-  const playSession = useCallback(
-    (startTime?: number) => {
-      stopAll();
-
-      if (!sessionAudioRef.current) {
-        sessionAudioRef.current = new Audio(
-          `${BASE}/sessions/${sessionId}/audio/combined`
-        );
+      // Revoke any previous blob URL
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
       }
 
-      const audio = sessionAudioRef.current;
-      audio.currentTime = startTime ?? 0;
-      audio.play();
-      setSessionPlaying(true);
+      const url = URL.createObjectURL(blob);
+      blobUrlRef.current = url;
 
-      // Poll to sync current segment highlight
-      pollRef.current = setInterval(() => {
-        const t = audio.currentTime;
-        const current = segments.find(
-          (s) => t >= s.start_time && t < s.end_time
-        );
-        setPlayingSegId(current?.id ?? null);
-      }, 200);
+      const audio = new Audio(url);
+      audioRef.current = audio;
 
-      audio.onended = () => {
-        stopAll();
-      };
+      // Wait for metadata to be loaded
+      await new Promise<void>((resolve, reject) => {
+        audio.addEventListener("loadedmetadata", () => resolve(), { once: true });
+        audio.addEventListener("error", () => reject(new Error("Audio decode error")), { once: true });
+      });
+
+      setDuration(audio.duration);
+      setLoaded(true);
+      setLoading(false);
+
+      audio.addEventListener("ended", () => {
+        setPlaying(false);
+        stopTimeLoop();
+      });
+
+      return audio;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to load audio";
+      setError(msg);
+      setLoading(false);
+      return null;
+    }
+  }, [sessionId, loaded, loading, stopTimeLoop]);
+
+  const play = useCallback(
+    async (startTime?: number) => {
+      const audio = await ensureAudio();
+      if (!audio) return;
+
+      if (startTime !== undefined) {
+        audio.currentTime = startTime;
+        setCurrentTime(startTime);
+      }
+
+      try {
+        await audio.play();
+        setPlaying(true);
+        startTimeLoop();
+      } catch {
+        // Autoplay may be blocked — user gesture required
+        setError("Playback blocked. Click play to start.");
+      }
     },
-    [sessionId, segments, stopAll]
+    [ensureAudio, startTimeLoop]
   );
+
+  const pause = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setPlaying(false);
+    stopTimeLoop();
+  }, [stopTimeLoop]);
+
+  const togglePlay = useCallback(() => {
+    if (playing) {
+      pause();
+    } else {
+      play();
+    }
+  }, [playing, play, pause]);
+
+  const seek = useCallback(
+    async (time: number) => {
+      const audio = await ensureAudio();
+      if (!audio) return;
+      audio.currentTime = time;
+      setCurrentTime(time);
+    },
+    [ensureAudio]
+  );
+
+  const stop = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setPlaying(false);
+    setCurrentTime(0);
+    stopTimeLoop();
+  }, [stopTimeLoop]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      audioMapRef.current.forEach((audio) => {
-        audio.pause();
-      });
-      if (sessionAudioRef.current) {
-        sessionAudioRef.current.pause();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
       }
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
       }
     };
   }, []);
 
-  return { playingSegId, sessionPlaying, playClip, playSession, stopAll };
+  // Reset when session changes
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+    setPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setLoaded(false);
+    setLoading(false);
+    setError(null);
+  }, [sessionId]);
+
+  return {
+    playing,
+    currentTime,
+    duration,
+    loaded,
+    loading,
+    error,
+    play,
+    pause,
+    togglePlay,
+    seek,
+    stop,
+  };
 }

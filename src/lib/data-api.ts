@@ -74,6 +74,40 @@ async function request<T>(
   return res.json();
 }
 
+/**
+ * Fetch a raw binary response from the data API (e.g. audio chunks).
+ * Returns the Response object directly so callers can stream or buffer it.
+ */
+async function requestRaw(
+  path: string,
+  options?: RequestInit & { retry?: boolean }
+): Promise<Response> {
+  const token = await getToken();
+  const url = `${DATA_API_URL}${path}`;
+
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...options?.headers,
+    },
+  });
+
+  if (res.status === 401 && options?.retry !== false) {
+    cachedToken = null;
+    return requestRaw(path, { ...options, retry: false });
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Data API error ${res.status}: ${res.statusText} ${body}`.trim()
+    );
+  }
+
+  return res;
+}
+
 // --- Public types for data-api responses ---
 
 export interface DataApiSession {
@@ -156,6 +190,22 @@ export const dataApi = {
 
   getScenes: (id: string) =>
     request<DataApiScene[]>(`/internal/sessions/${id}/scenes`),
+
+  /**
+   * Fetch a single raw PCM audio chunk for a speaker.
+   * Returns the Response so it can be streamed/buffered.
+   */
+  getAudioChunk: (sessionId: string, pseudoId: string, seq: number) =>
+    requestRaw(
+      `/internal/sessions/${sessionId}/audio/${pseudoId}/chunk/${seq}`
+    ),
+
+  /**
+   * Get the list of participants (with pseudo_ids) for building audio URLs.
+   * Re-export for convenience in audio routes.
+   */
+  getParticipantsForAudio: (id: string) =>
+    request<DataApiParticipant[]>(`/internal/sessions/${id}/participants`),
 
   /** Check if the data API is reachable and auth works. */
   healthCheck: async (): Promise<{ ok: boolean; error?: string }> => {

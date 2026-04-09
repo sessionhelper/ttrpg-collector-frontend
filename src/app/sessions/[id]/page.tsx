@@ -3,6 +3,8 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Ghost, Flag, Pencil, UserRoundX, Volume2, User, ChevronLeft } from "lucide-react";
 import { useSessionEvents } from "@/hooks/use-session-events";
+import { useAudioPlayback } from "@/hooks/use-audio-playback";
+import { PlaybackControls } from "@/components/transcript/playback-controls";
 import { AppShell } from "@/components/layout/app-shell";
 import Link from "next/link";
 
@@ -253,8 +255,8 @@ function buildBlocks(segments: Segment[]): Block[] {
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: sessionId } = React.use(params);
   const [data, setData] = useState<PipelineResult | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [playing, setPlaying] = useState(false);
+  const audio = useAudioPlayback(sessionId);
+  const { playing, currentTime } = audio;
   const [selectedScene, setSelectedScene] = useState<number | null>(null);
   const [selection, setSelection] = useState<{ type: "line" | "block" | "scene"; blockIdx: number; segIdx?: number; scene?: number } | null>(null);
   const [flashingBlock, setFlashingBlock] = useState<number | null>(null);
@@ -263,7 +265,6 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const [editText, setEditText] = useState("");
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActiveBlock = useRef<number | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const blockRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   // Real-time event subscription: append new segments as the worker
@@ -318,13 +319,6 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
       });
   }, [sessionId]);
 
-  useEffect(() => {
-    if (playing) {
-      timerRef.current = setInterval(() => setCurrentTime((prev) => prev + 0.1), 100);
-    } else if (timerRef.current) { clearInterval(timerRef.current); }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [playing]);
-
   // Flash on block transition + scroll when active block leaves viewport
   useEffect(() => {
     if (!playing) return;
@@ -351,11 +345,10 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
     }
   });
 
-  const jumpTo = useCallback((time: number) => setCurrentTime(time), []);
+  const jumpTo = useCallback((time: number) => audio.seek(time), [audio]);
   const playClip = useCallback((time: number) => {
-    setCurrentTime(time);
-    setPlaying(true);
-  }, []);
+    audio.play(time);
+  }, [audio]);
 
   const startEdit = useCallback((blockSegments: Segment[]) => {
     setEditingSegId(blockSegments[0].id);
@@ -463,40 +456,39 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
       {/* Control strip: playback + scene filter */}
       <div className="border border-rule rounded bg-card-surface px-4 py-2.5 mb-6">
-        <div className="flex items-center gap-3 flex-wrap">
-          <button onClick={() => setPlaying(!playing)}
-            className="px-3 py-1 rounded font-sans text-sm bg-accent-brown text-card-surface hover:bg-accent-light transition-colors">
-            {playing ? "Pause" : "Play"}
-          </button>
-          <input type="range" min={0} max={maxTime} step={0.1} value={currentTime}
-            onChange={(e) => setCurrentTime(parseFloat(e.target.value))}
-            className="flex-1 min-w-[120px] accent-[#8b4513]" />
-          <span className="font-mono text-xs text-ink-faint">{formatTime(currentTime)}</span>
-          {scenes.length > 1 && (
-            <>
-              <div className="w-px h-5 bg-rule mx-1" />
-              <span className="font-sans text-xs text-ink-faint">Scene:</span>
-              <div className="flex gap-1 flex-wrap">
-                <button onClick={() => setSelectedScene(null)}
+        <PlaybackControls
+          playing={playing}
+          currentTime={currentTime}
+          duration={audio.duration || maxTime}
+          loading={audio.loading}
+          error={audio.error}
+          onTogglePlay={audio.togglePlay}
+          onStop={audio.stop}
+          onSeek={audio.seek}
+        />
+        {scenes.length > 1 && (
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-rule flex-wrap">
+            <span className="font-sans text-xs text-ink-faint">Scene:</span>
+            <div className="flex gap-1 flex-wrap">
+              <button onClick={() => setSelectedScene(null)}
+                className={`px-2 py-0.5 rounded font-sans text-xs border transition-colors ${
+                  selectedScene === null
+                    ? "bg-accent-brown text-card-surface border-accent-brown"
+                    : "bg-transparent text-ink-faint border-rule hover:border-ink-faint"
+                }`}>All</button>
+              {scenes.map((s) => (
+                <button key={s} onClick={() => setSelectedScene(s)}
                   className={`px-2 py-0.5 rounded font-sans text-xs border transition-colors ${
-                    selectedScene === null
+                    selectedScene === s
                       ? "bg-accent-brown text-card-surface border-accent-brown"
                       : "bg-transparent text-ink-faint border-rule hover:border-ink-faint"
-                  }`}>All</button>
-                {scenes.map((s) => (
-                  <button key={s} onClick={() => setSelectedScene(s)}
-                    className={`px-2 py-0.5 rounded font-sans text-xs border transition-colors ${
-                      selectedScene === s
-                        ? "bg-accent-brown text-card-surface border-accent-brown"
-                        : "bg-transparent text-ink-faint border-rule hover:border-ink-faint"
-                    }`}>
-                    {s + 1}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+                  }`}>
+                  {s + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Transcript area */}
