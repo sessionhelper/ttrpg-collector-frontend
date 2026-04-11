@@ -1,12 +1,14 @@
-# Architecture
+# chronicle-portal — Architecture
 
 ## System overview
 
-The TTRPG Collector frontend is the participant portal and transcript
-viewer for the Open Voice Project. Participants can log in, browse their
-sessions, watch transcripts arrive in real time as the worker transcribes
-them, play back mixed audio for any time range, and (eventually) correct
-or flag segments.
+chronicle-portal is the participant portal and transcript viewer for
+the Open Voice Project (OVP). Participants log in via Discord OAuth,
+browse their sessions, watch transcripts arrive in real time as the
+worker transcribes them, play back mixed audio for any time range, and
+(eventually) correct or flag segments. This is the user-facing surface
+of the Chronicle toolchain — the only component players interact with
+directly.
 
 The frontend is a Next.js 15 / React 19 app that runs its own BFF layer
 in `src/app/api/*`. The BFF talks directly to `chronicle-data-api` using the
