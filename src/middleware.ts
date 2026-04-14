@@ -28,4 +28,8 @@ export const config = {
     // BFF API (BFF handles its own auth via apiHandler).
     "/((?!_next/static|_next/image|favicon.ico|api/auth|api/metrics).*)",
   ],
+  // Node runtime required because the full Auth.js config transitively
+  // imports `prom-client` (via `@/lib/auth` → `@/lib/metrics`), which
+  // calls `process.uptime()` — unsupported under Edge.
+  runtime: "nodejs",
 };
