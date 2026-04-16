@@ -26,7 +26,7 @@ export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 
 export const SessionSchema = z.object({
   id: z.string(),
-  guild_id: z.string(),
+  guild_id: z.union([z.string(), z.number()]).transform(String),
   started_at: z.string(),
   ended_at: z.string().nullable(),
   status: SessionStatusSchema,
