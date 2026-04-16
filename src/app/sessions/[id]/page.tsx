@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 
+import { MuteRanges } from "@/components/admin/mute-ranges";
+import { RerunButton } from "@/components/admin/rerun-button";
 import { AppShell } from "@/components/app-shell";
 import { SegmentList } from "@/components/segment-list";
 import { SessionLiveBadge } from "@/components/session-live-badge";
@@ -49,10 +51,13 @@ export default async function SessionDetailPage({ params }: Props) {
               : ""}
           </p>
         </div>
-        <SessionLiveBadge
-          sessionId={session.id}
-          initialStatus={session.status}
-        />
+        <div className="flex items-center gap-2">
+          {user.is_admin && <RerunButton sessionId={session.id} />}
+          <SessionLiveBadge
+            sessionId={session.id}
+            initialStatus={session.status}
+          />
+        </div>
       </div>
 
       <Card className="mb-6">
@@ -75,6 +80,24 @@ export default async function SessionDetailPage({ params }: Props) {
         participants={participants}
         canEdit={canEdit}
       />
+
+      {user.is_admin && participants.length > 0 && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Mute Ranges</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {participants.map((p) => (
+              <MuteRanges
+                key={p.user_pseudo_id ?? p.id}
+                sessionId={session.id}
+                pseudoId={p.user_pseudo_id ?? p.id}
+                participantName={p.display_name || p.user_pseudo_id || p.id}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </AppShell>
   );
 }

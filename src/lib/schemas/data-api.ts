@@ -112,6 +112,17 @@ export const UserSchema = z.object({
 });
 export type User = z.infer<typeof UserSchema>;
 
+export const MuteRangeSchema = z.object({
+  id: z.string(),
+  session_id: z.string(),
+  pseudo_id: z.string(),
+  start_offset_ms: z.number(),
+  end_offset_ms: z.number(),
+  reason: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+});
+export type MuteRange = z.infer<typeof MuteRangeSchema>;
+
 export const DisplayNameSchema = z.object({
   pseudo_id: z.string(),
   display_name: z.string(),

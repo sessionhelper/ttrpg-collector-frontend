@@ -23,6 +23,7 @@ import {
   SessionSchema,
   SessionSummarySchema,
   UserSchema,
+  type MuteRange,
   type Participant,
   type Segment,
   type Session,
@@ -357,6 +358,47 @@ class DataApiClient {
       `/internal/sessions/${sessionId}/participants/${pseudoId}/audio/stream`,
       { op: "stream_participant_audio", headers },
     );
+  }
+
+  // ---- Mute ranges (admin) ----
+
+  async listMuteRanges(sessionId: string, pseudoId: string): Promise<MuteRange[]> {
+    return this.json(
+      `/internal/sessions/${sessionId}/participants/${pseudoId}/mute`,
+      "list_mute_ranges",
+      (v) => (v as MuteRange[]),
+    );
+  }
+
+  async createMuteRange(
+    sessionId: string,
+    pseudoId: string,
+    body: { start_offset_ms: number; end_offset_ms: number; reason?: string },
+  ): Promise<MuteRange> {
+    return this.json(
+      `/internal/sessions/${sessionId}/participants/${pseudoId}/mute`,
+      "create_mute_range",
+      (v) => (v as MuteRange),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  async removeMuteRange(
+    sessionId: string,
+    pseudoId: string,
+    rangeId: string,
+  ): Promise<void> {
+    const res = await this.raw(
+      `/internal/sessions/${sessionId}/participants/${pseudoId}/mute/${rangeId}`,
+      { op: "delete_mute_range", method: "DELETE" },
+    );
+    if (!res.ok && res.status !== 204) {
+      throw upstreamError(res.status, `delete_mute_range ${res.status}`);
+    }
   }
 
   // ---- Worker admin ----
