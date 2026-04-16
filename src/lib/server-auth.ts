@@ -80,8 +80,6 @@ export async function resolveSessionRole(
   role: SessionRole;
   participantId: string | null;
 }> {
-  if (user.is_admin) return { role: "admin", participantId: null };
-
   const [session, participants] = await Promise.all([
     dataApiClient.getSession(sessionId),
     dataApiClient.listParticipants(sessionId),
@@ -89,6 +87,10 @@ export async function resolveSessionRole(
 
   const mine =
     participants.find((p) => p.user_pseudo_id === user.pseudo_id) ?? null;
+
+  // Admin still has admin powers, but also expose their own participantId
+  // so /me/... routes (consent, license, delete-own-audio) can act on self.
+  if (user.is_admin) return { role: "admin", participantId: mine?.id ?? null };
 
   if (session.initiator_pseudo_id === user.pseudo_id) {
     return { role: "gm", participantId: mine?.id ?? null };
