@@ -6,6 +6,6 @@ import { requireAdmin } from "@/lib/server-auth";
 
 export const GET = apiHandler("api.admin.users.list", async () => {
   await requireAdmin();
-  const users = await dataApiClient.listUsers();
+  const users = await dataApiClient.listAdminUsers();
   return NextResponse.json(users);
 });

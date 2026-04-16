@@ -172,3 +172,38 @@ export const DisplayNameSchema = z.object({
 });
 
 export const DisplayNameListSchema = z.array(DisplayNameSchema);
+
+// Admin user list item — enriched for the admin surface (see
+// sessionhelper-hub/docs/admin-users-spec.md).
+export const AdminUserListItemSchema = z.object({
+  pseudo_id: z.string(),
+  is_admin: z.boolean().default(false),
+  data_wiped_at: z.string().nullable().optional(),
+  created_at: z.string(),
+  latest_display_name: z.string().nullable().optional(),
+  session_count: z.number().int().nonnegative(),
+  last_active_at: z.string().nullable().optional(),
+  has_consent_on_file: z.boolean().default(false),
+});
+export type AdminUserListItem = z.infer<typeof AdminUserListItemSchema>;
+export const AdminUserListSchema = z.array(AdminUserListItemSchema);
+
+export const ParticipatedSessionSchema = z.object({
+  session_id: z.string(),
+  campaign_name: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  started_at: z.string(),
+  ended_at: z.string().nullable().optional(),
+  status: z.string(),
+  consent_scope: z.string().nullable().optional(),
+  data_wiped_at: z.string().nullable().optional(),
+});
+export type ParticipatedSession = z.infer<typeof ParticipatedSessionSchema>;
+
+export const AdminUserDetailSchema = z.object({
+  user: UserSchema,
+  latest_display_name: z.string().nullable().optional(),
+  display_names: DisplayNameListSchema,
+  sessions: z.array(ParticipatedSessionSchema),
+});
+export type AdminUserDetail = z.infer<typeof AdminUserDetailSchema>;

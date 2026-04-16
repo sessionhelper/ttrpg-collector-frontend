@@ -15,6 +15,8 @@
 import { env } from "@/lib/env";
 import { metrics } from "@/lib/metrics";
 import {
+  AdminUserDetailSchema,
+  AdminUserListSchema,
   ParticipantListSchema,
   ParticipantSchema,
   SegmentListSchema,
@@ -23,6 +25,8 @@ import {
   SessionSchema,
   SessionSummarySchema,
   UserSchema,
+  type AdminUserDetail,
+  type AdminUserListItem,
   type MuteRange,
   type Participant,
   type Segment,
@@ -202,11 +206,19 @@ class DataApiClient {
     );
   }
 
-  async listUsers(): Promise<User[]> {
+  async listAdminUsers(): Promise<AdminUserListItem[]> {
     return this.json(
       `/internal/admin/users`,
-      "list_users",
-      (v) => v as User[], // server-defined shape; loose parse.
+      "list_admin_users",
+      (v) => AdminUserListSchema.parse(v),
+    );
+  }
+
+  async getAdminUserDetail(pseudoId: string): Promise<AdminUserDetail> {
+    return this.json(
+      `/internal/admin/users/${pseudoId}`,
+      "get_admin_user_detail",
+      (v) => AdminUserDetailSchema.parse(v),
     );
   }
 
