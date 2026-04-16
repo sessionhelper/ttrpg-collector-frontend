@@ -1,15 +1,25 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchVisibleSessions } from "@/lib/page-data";
 import { formatDate } from "@/lib/utils";
-import { requireUser } from "@/lib/server-auth";
+import { AuthError, requireUser } from "@/lib/server-auth";
 
 export default async function DashboardPage() {
-  const user = await requireUser();
-  const sessions = await fetchVisibleSessions(user);
+  let user;
+  try {
+    user = await requireUser();
+  } catch (err) {
+    if (err instanceof AuthError) {
+      redirect("/login");
+    }
+    throw err;
+  }
+
+  const sessions = await fetchVisibleSessions(user).catch(() => []);
   const latest = sessions[0];
 
   return (

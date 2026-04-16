@@ -1,15 +1,22 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { SessionLiveBadge } from "@/components/session-live-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { fetchVisibleSessions } from "@/lib/page-data";
-import { requireUser } from "@/lib/server-auth";
+import { AuthError, requireUser } from "@/lib/server-auth";
 import { formatDate } from "@/lib/utils";
 
 export default async function SessionsPage() {
-  const user = await requireUser();
-  const sessions = await fetchVisibleSessions(user);
+  let user;
+  try {
+    user = await requireUser();
+  } catch (err) {
+    if (err instanceof AuthError) redirect("/login");
+    throw err;
+  }
+  const sessions = await fetchVisibleSessions(user).catch(() => []);
 
   return (
     <AppShell>
