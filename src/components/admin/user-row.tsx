@@ -30,9 +30,9 @@ export function UserRow({ user }: { user: User }) {
   return (
     <div className="flex items-center justify-between border-b py-3 last:border-0">
       <div>
-        <div className="font-medium">
-          {user.display_name ?? <span className="text-muted-foreground">(no name)</span>}
-        </div>
+        {user.display_name && (
+          <div className="font-medium">{user.display_name}</div>
+        )}
         <div className="font-mono text-xs text-muted-foreground">
           {user.pseudo_id}
         </div>
