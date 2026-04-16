@@ -168,6 +168,8 @@ class DataApiClient {
       `/internal/users/${pseudoId}`,
       "get_user",
       (v) => {
+        // GET returns an envelope { user, latest_display_name }.
+        // POST /internal/users returns the flat user. Handle both.
         const obj = v as Record<string, unknown>;
         return UserSchema.parse(obj.user ?? obj);
       },
