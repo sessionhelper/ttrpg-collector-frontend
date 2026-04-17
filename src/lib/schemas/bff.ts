@@ -9,12 +9,26 @@
 
 import { z } from "zod";
 
-/** PATCH /api/segments/:id — text edit only. Everything else is stripped. */
+/** PATCH /api/segments/:id — editable segment fields. */
 export const SegmentPatchBodySchema = z
   .object({
-    text: z.string().min(0).max(50_000),
+    text: z.string().min(0).max(50_000).optional(),
+    start_ms: z.number().int().nonnegative().optional(),
+    end_ms: z.number().int().nonnegative().optional(),
+    pseudo_id: z
+      .string()
+      .regex(/^[0-9a-f]{24}$/)
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (b) =>
+      b.text !== undefined ||
+      b.start_ms !== undefined ||
+      b.end_ms !== undefined ||
+      b.pseudo_id !== undefined,
+    { message: "at least one field must be provided" },
+  );
 export type SegmentPatchBody = z.infer<typeof SegmentPatchBodySchema>;
 
 /** PATCH /api/me/sessions/:id/consent */

@@ -333,7 +333,10 @@ class DataApiClient {
   async patchSegment(
     segmentId: string,
     body: {
-      text: string;
+      text?: string;
+      start_ms?: number;
+      end_ms?: number;
+      pseudo_id?: string;
       author_service: "chronicle-portal";
       author_user_pseudo_id: string;
     },

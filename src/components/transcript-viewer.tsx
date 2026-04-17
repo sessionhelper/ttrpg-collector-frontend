@@ -152,14 +152,38 @@ function buildBlocks(segments: Segment[]): Block[] {
 
 /* ---------------- Helpers ---------------- */
 
-async function patchSegment(segmentId: string, text: string): Promise<Segment> {
+async function patchSegment(
+  segmentId: string,
+  body: { text?: string; start_ms?: number; end_ms?: number; pseudo_id?: string },
+): Promise<Segment> {
   const res = await fetch(`/api/segments/${segmentId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`PATCH segment ${res.status}`);
   return (await res.json()) as Segment;
+}
+
+async function deleteSegment(segmentId: string): Promise<void> {
+  const res = await fetch(`/api/segments/${segmentId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok && res.status !== 204) throw new Error(`DELETE segment ${res.status}`);
+}
+
+async function splitSegment(
+  segmentId: string,
+  splitMs: number,
+  secondText?: string,
+): Promise<{ first: Segment; second_id: string }> {
+  const res = await fetch(`/api/segments/${segmentId}/split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ split_ms: splitMs, second_text: secondText }),
+  });
+  if (!res.ok) throw new Error(`SPLIT segment ${res.status}`);
+  return (await res.json()) as { first: Segment; second_id: string };
 }
 
 const RATE_PRESETS: PlaybackRate[] = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -246,15 +270,20 @@ export function TranscriptViewer({
   );
 
   const saveEdit = useCallback(
-    async (seg: Segment) => {
+    async (seg: Segment, fields?: { start_ms?: number; end_ms?: number; pseudo_id?: string }) => {
       const trimmed = editText.trim();
-      if (!trimmed || trimmed === (seg.text ?? "")) {
+      const textChanged = trimmed !== (seg.text ?? "");
+      const hasFieldChanges = fields && Object.keys(fields).length > 0;
+      if (!textChanged && !hasFieldChanges) {
         setEditingId(null);
         return;
       }
       setSavingId(seg.id);
       try {
-        const updated = await patchSegment(seg.id, trimmed);
+        const body: Record<string, unknown> = {};
+        if (textChanged && trimmed) body.text = trimmed;
+        if (fields) Object.assign(body, fields);
+        const updated = await patchSegment(seg.id, body as { text?: string; start_ms?: number; end_ms?: number; pseudo_id?: string });
         setSegments((prev) =>
           prev.map((s) => (s.id === seg.id ? { ...s, ...updated } : s)),
         );
@@ -266,6 +295,43 @@ export function TranscriptViewer({
       }
     },
     [editText],
+  );
+
+  const handleDelete = useCallback(
+    async (seg: Segment) => {
+      setSavingId(seg.id);
+      try {
+        await deleteSegment(seg.id);
+        setSegments((prev) => prev.filter((s) => s.id !== seg.id));
+        setEditingId(null);
+      } catch (err) {
+        console.error("delete failed", err);
+      } finally {
+        setSavingId(null);
+      }
+    },
+    [],
+  );
+
+  const handleSplit = useCallback(
+    async (seg: Segment, splitMs: number) => {
+      setSavingId(seg.id);
+      try {
+        const result = await splitSegment(seg.id, splitMs, "");
+        // Reload segments from server to get correct state
+        const res = await fetch(`/api/sessions/${result.first.session_id}/segments`);
+        if (res.ok) {
+          const fresh = (await res.json()) as Segment[];
+          setSegments(fresh.sort((a, b) => a.start_ms - b.start_ms));
+        }
+        setEditingId(null);
+      } catch (err) {
+        console.error("split failed", err);
+      } finally {
+        setSavingId(null);
+      }
+    },
+    [],
   );
 
   const playSegment = useCallback(
@@ -366,6 +432,10 @@ export function TranscriptViewer({
               segmentRefs={segmentRefs}
               seekTo={audio.seekMs}
               playSegment={playSegment}
+              onDelete={handleDelete}
+              onSplit={handleSplit}
+              isAdmin={Object.keys(canEdit).length > 0}
+              speakers={byPid}
             />
           ) : (
             <OverlapBlock
@@ -458,6 +528,10 @@ function SingleBlock({
   segmentRefs,
   seekTo,
   playSegment,
+  onDelete,
+  onSplit,
+  isAdmin,
+  speakers,
 }: {
   block: Extract<Block, { type: "single" }>;
   speaker: SpeakerMeta | undefined;
@@ -466,7 +540,7 @@ function SingleBlock({
   editText: string;
   setEditText: (s: string) => void;
   startEdit: (seg: Segment) => void;
-  saveEdit: (seg: Segment) => Promise<void>;
+  saveEdit: (seg: Segment, fields?: { start_ms?: number; end_ms?: number; pseudo_id?: string }) => Promise<void>;
   cancelEdit: () => void;
   savingId: string | null;
   canEdit: Record<string, boolean>;
@@ -474,6 +548,10 @@ function SingleBlock({
   segmentRefs: React.RefObject<Record<string, HTMLDivElement | null>>;
   seekTo: (ms: number) => void;
   playSegment: (seg: Segment) => void;
+  onDelete: (seg: Segment) => Promise<void>;
+  onSplit: (seg: Segment, splitMs: number) => Promise<void>;
+  isAdmin: boolean;
+  speakers: Record<string, SpeakerMeta>;
 }) {
   const accent = speakerColor(speaker);
   return (
@@ -528,30 +606,21 @@ function SingleBlock({
                 onClick={() => seekTo(seg.start_ms)}
               />
               {isEditing ? (
-                <div className="flex-1 space-y-2">
-                  <textarea
-                    className="w-full rounded border bg-background p-2 text-sm"
-                    value={editText}
-                    onChange={(e) => setEditText(e.target.value)}
-                    rows={Math.max(2, Math.ceil(editText.length / 80))}
-                    autoFocus
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
-                      disabled={savingId === seg.id}
-                      onClick={() => void saveEdit(seg)}
-                    >
-                      {savingId === seg.id ? "Saving…" : "Save"}
-                    </button>
-                    <button
-                      className="rounded border px-2 py-1 text-xs"
-                      onClick={cancelEdit}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
+                <SegmentEditor
+                  seg={seg}
+                  editText={editText}
+                  setEditText={setEditText}
+                  savingId={savingId}
+                  onSave={(fields) => void saveEdit(seg, fields)}
+                  onCancel={cancelEdit}
+                  onDelete={isAdmin ? () => void onDelete(seg) : undefined}
+                  onSplit={
+                    isAdmin
+                      ? (ms) => void onSplit(seg, ms)
+                      : undefined
+                  }
+                  speakers={speakers}
+                />
               ) : (
                 <>
                   <p
@@ -575,6 +644,162 @@ function SingleBlock({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- SegmentEditor — expanded edit panel ---------------- */
+
+function SegmentEditor({
+  seg,
+  editText,
+  setEditText,
+  savingId,
+  onSave,
+  onCancel,
+  onDelete,
+  onSplit,
+  speakers,
+}: {
+  seg: Segment;
+  editText: string;
+  setEditText: (s: string) => void;
+  savingId: string | null;
+  onSave: (fields?: { start_ms?: number; end_ms?: number; pseudo_id?: string }) => void;
+  onCancel: () => void;
+  onDelete?: () => void;
+  onSplit?: (ms: number) => void;
+  speakers: Record<string, SpeakerMeta>;
+}) {
+  const [startMs, setStartMs] = useState(seg.start_ms);
+  const [endMs, setEndMs] = useState(seg.end_ms);
+  const [speaker, setSpeaker] = useState(seg.pseudo_id);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const isBusy = savingId === seg.id;
+  const hasTimecodeChange = startMs !== seg.start_ms || endMs !== seg.end_ms;
+  const hasSpeakerChange = speaker !== seg.pseudo_id;
+  const midpoint = Math.round((seg.start_ms + seg.end_ms) / 2);
+
+  const handleSave = () => {
+    const fields: { start_ms?: number; end_ms?: number; pseudo_id?: string } = {};
+    if (hasTimecodeChange) {
+      fields.start_ms = startMs;
+      fields.end_ms = endMs;
+    }
+    if (hasSpeakerChange) {
+      fields.pseudo_id = speaker;
+    }
+    onSave(Object.keys(fields).length > 0 ? fields : undefined);
+  };
+
+  return (
+    <div className="flex-1 space-y-2 rounded border bg-muted/30 p-2">
+      <textarea
+        className="w-full rounded border bg-background p-2 text-sm"
+        value={editText}
+        onChange={(e) => setEditText(e.target.value)}
+        rows={Math.max(2, Math.ceil(editText.length / 80))}
+        autoFocus
+      />
+
+      {seg.original && (
+        <p className="text-[11px] text-muted-foreground">
+          <span className="font-medium">Original:</span>{" "}
+          {typeof seg.original === "string"
+            ? seg.original
+            : JSON.stringify(seg.original)}
+        </p>
+      )}
+
+      <button
+        className="text-[11px] text-muted-foreground hover:text-foreground underline"
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        type="button"
+      >
+        {showAdvanced ? "Hide advanced" : "Show advanced (timecodes, speaker, split)"}
+      </button>
+
+      {showAdvanced && (
+        <div className="space-y-2 rounded border bg-background p-2 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1">
+              Start (ms)
+              <input
+                type="number"
+                className="w-24 rounded border bg-background px-2 py-1 text-xs"
+                value={startMs}
+                onChange={(e) => setStartMs(parseInt(e.target.value, 10) || 0)}
+              />
+            </label>
+            <label className="flex items-center gap-1">
+              End (ms)
+              <input
+                type="number"
+                className="w-24 rounded border bg-background px-2 py-1 text-xs"
+                value={endMs}
+                onChange={(e) => setEndMs(parseInt(e.target.value, 10) || 0)}
+              />
+            </label>
+            <span className="text-muted-foreground">
+              {fmtTime(startMs / 1000)} – {fmtTime(endMs / 1000)}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-muted-foreground">Speaker</label>
+            <select
+              className="rounded border bg-background px-2 py-1 text-xs"
+              value={speaker}
+              onChange={(e) => setSpeaker(e.target.value)}
+            >
+              {Object.entries(speakers).map(([pid, meta]) => (
+                <option key={pid} value={pid}>
+                  {meta.label} ({pid.slice(0, 8)})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 border-t pt-2">
+            {onSplit && (
+              <button
+                className="rounded border px-2 py-1 text-xs hover:bg-accent"
+                disabled={isBusy}
+                onClick={() => onSplit(midpoint)}
+                title={`Split at midpoint (${fmtTime(midpoint / 1000)})`}
+              >
+                Split at midpoint
+              </button>
+            )}
+            {onDelete && (
+              <button
+                className="rounded border border-destructive px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                disabled={isBusy}
+                onClick={onDelete}
+              >
+                Delete segment
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+          disabled={isBusy}
+          onClick={handleSave}
+        >
+          {isBusy ? "Saving…" : "Save"}
+        </button>
+        <button
+          className="rounded border px-2 py-1 text-xs"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );
