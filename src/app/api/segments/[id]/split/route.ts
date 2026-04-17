@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { v4 as uuidv4 } from "uuid";
 
 import { apiHandler, parseJson } from "@/lib/api-handler";
 import { dataApiClient } from "@/lib/data-api-client";
@@ -51,7 +50,7 @@ export const POST = apiHandler<{ id: string }>(
     const newSegPayload = {
       segments: [
         {
-          client_id: uuidv4(),
+          client_id: crypto.randomUUID(),
           start_ms: body.split_ms,
           end_ms: original.end_ms,
           pseudo_id: original.pseudo_id,

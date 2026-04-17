@@ -704,7 +704,7 @@ function SegmentEditor({
         autoFocus
       />
 
-      {seg.original && (
+      {seg.original != null && (
         <p className="text-[11px] text-muted-foreground">
           <span className="font-medium">Original:</span>{" "}
           {typeof seg.original === "string"
